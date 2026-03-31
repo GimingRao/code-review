@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { resolveRepoPath } from "./config.js";
+import { resolveRepoConfig, resolveRepoPath } from "./config.js";
 import { logger } from "./logger.js";
 
 const execFileAsync = promisify(execFile);
@@ -15,16 +15,23 @@ async function runGit(args, cwd) {
   return { stdout, stderr };
 }
 
-function rewriteRepoUrl(config, repoUrl) {
-  if (config.repo.rewriteFrom && config.repo.rewriteTo) {
-    return repoUrl.replace(config.repo.rewriteFrom, config.repo.rewriteTo);
+function rewriteRepoUrl(config, repoKey, repoUrl) {
+  const repoConfig = resolveRepoConfig(config, repoKey);
+  if (repoConfig.cloneUrl) {
+    return repoConfig.cloneUrl;
+  }
+
+  const rewriteFrom = repoConfig.rewrite?.from || config.repo.defaultRewrite.from;
+  const rewriteTo = repoConfig.rewrite?.to || config.repo.defaultRewrite.to;
+  if (rewriteFrom && rewriteTo) {
+    return repoUrl.replace(rewriteFrom, rewriteTo);
   }
   return repoUrl;
 }
 
 export async function ensureRepoCheckout(config, event) {
   const repoKey = event.body.repo.key;
-  const repoUrl = rewriteRepoUrl(config, event.body.repo.url);
+  const repoUrl = rewriteRepoUrl(config, repoKey, event.body.repo.url);
   const commitSha = extractCommitSha(event.body.commit.url);
   const repoPath = resolveRepoPath(config, repoKey);
   const repoParent = path.dirname(repoPath);

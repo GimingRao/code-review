@@ -1,4 +1,5 @@
 node_modules
-.env
+config.yaml
+feishu-users.json
 .repos
 .claude-review

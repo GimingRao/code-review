@@ -1,12 +1,12 @@
 import { logger } from "./logger.js";
 
 function buildMention(config, email, fallbackName) {
-  const mappedId = config.feishu.idMap[email];
-  if (!mappedId) {
+  const mappedUser = config.feishu.userMap[email];
+  if (!mappedUser?.id) {
     return fallbackName || email;
   }
 
-  return `<at user_id="${mappedId}">${fallbackName || email}</at>`;
+  return `<at user_id="${mappedUser.id}">${mappedUser.name || fallbackName || email}</at>`;
 }
 
 export async function notifyLowScore(config, event, review) {

@@ -20,22 +20,28 @@
 
 ```bash
 npm install
-cp .env.example .env
+cp config.yaml.example config.yaml
+cp feishu-users.example.json feishu-users.json
 ```
 
 ## 关键配置
 
-- `REPO_BASE_DIR`: 本地仓库根目录，脚本会在这里维护 checkout
-- `REPO_PATH_MAP_JSON`: repo key 到本地路径的映射，优先级高于自动 clone
-- `REPO_URL_REWRITE_FROM` / `REPO_URL_REWRITE_TO`: 用于把 webhook 里的 HTTP 地址改写成可 clone 的地址
-- `CLAUDE_REVIEW_MIN_SCORE`: 低于该分数触发飞书告警
-- `FEISHU_USER_ID_MAP_JSON`: `{"邮箱":"飞书user_id/open_id"}`
+- 所有运行配置统一写在项目根目录的 `config.yaml`
+- `repo.repos.<repoKey>.localPath`: 某个仓库专属的本地路径
+- `repo.repos.<repoKey>.cloneUrl`: 某个仓库专属的 clone 地址
+- `repo.repos.<repoKey>.rewrite.from/to`: 某个仓库专属的地址改写规则
+- `repo.defaultRewrite.from/to`: 全局默认地址改写规则
+- `claude.minScore`: 低于该分数触发飞书告警
+- `feishu.userMapFile`: 飞书用户映射 JSON 文件路径
 
 ## 运行
 
 ```bash
 npm start
 ```
+
+配置文件示例见 [config.yaml.example](/Users/giming/code/code-review/config.yaml.example)。
+飞书用户映射示例见 [feishu-users.example.json](/Users/giming/code/code-review/feishu-users.example.json)。
 
 ## Claude 输出格式
 
@@ -55,4 +61,4 @@ npm start
 ## 注意
 
 - 这里默认使用 Anthropic 官方 Agent SDK 包：`@anthropic-ai/claude-agent-sdk`
-- 当前版本把飞书提醒实现为群机器人 webhook；如果你们后续要做更精确的用户查找，可以再接飞书通讯录 API
+- 飞书邮箱映射 JSON 使用 `email -> user info` 结构，当前实际只用到 `id` 和 `name`

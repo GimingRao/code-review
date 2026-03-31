@@ -1,26 +1,27 @@
 import fs from "node:fs";
 import path from "node:path";
-import dotenv from "dotenv";
+import YAML from "yaml";
 
-dotenv.config();
-
-function requireEnv(name) {
-  const value = process.env[name];
+function requireField(object, fieldPath) {
+  const value = fieldPath.split(".").reduce((current, key) => current?.[key], object);
   if (!value) {
-    throw new Error(`Missing required env: ${name}`);
+    throw new Error(`Missing required config field: ${fieldPath}`);
   }
   return value;
 }
 
 function parseBoolean(value, fallback = false) {
-  if (value === undefined || value === "") {
+  if (value === undefined || value === null) {
     return fallback;
+  }
+  if (typeof value === "boolean") {
+    return value;
   }
   return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
 }
 
 function parseNumber(value, fallback) {
-  if (value === undefined || value === "") {
+  if (value === undefined || value === null || value === "") {
     return fallback;
   }
   const parsed = Number(value);
@@ -30,69 +31,92 @@ function parseNumber(value, fallback) {
   return parsed;
 }
 
-function parseJsonMap(name) {
-  const raw = process.env[name];
-  if (!raw) {
-    return {};
+function parseObject(value, fallback = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return fallback;
   }
+  return value;
+}
 
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error("must be a JSON object");
-    }
-    return parsed;
-  } catch (error) {
-    throw new Error(`Invalid JSON in ${name}: ${error.message}`);
+function parseStringArray(value, fallback = []) {
+  if (!Array.isArray(value)) {
+    return fallback;
   }
+  return value.map((item) => String(item).trim()).filter(Boolean);
 }
 
 export function loadConfig() {
-  const repoBaseDir = requireEnv("REPO_BASE_DIR");
+  const configPath = path.resolve(process.cwd(), "config.yaml");
+  if (!fs.existsSync(configPath)) {
+    throw new Error(`Missing config file: ${configPath}`);
+  }
+
+  const raw = fs.readFileSync(configPath, "utf8");
+  const parsed = YAML.parse(raw) || {};
+  const userMapFile = path.resolve(process.cwd(), parsed.feishu?.userMapFile || "./feishu-users.json");
+  const userMap = loadJsonFile(userMapFile, {});
+
+  const repoBaseDir = requireField(parsed, "repo.baseDir");
   fs.mkdirSync(repoBaseDir, { recursive: true });
 
   return {
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+    anthropicApiKey: parsed.anthropicApiKey || "",
     kafka: {
-      brokers: requireEnv("KAFKA_BROKERS").split(",").map((item) => item.trim()).filter(Boolean),
-      clientId: process.env.KAFKA_CLIENT_ID || "commit-review-bot",
-      groupId: process.env.KAFKA_GROUP_ID || "commit-review-bot",
-      topic: process.env.KAFKA_TOPIC || "code-events",
-      ssl: parseBoolean(process.env.KAFKA_SSL, false),
-      sasl: process.env.KAFKA_USERNAME
+      brokers: parseStringArray(requireField(parsed, "kafka.brokers")),
+      clientId: parsed.kafka?.clientId || "commit-review-bot",
+      groupId: parsed.kafka?.groupId || "commit-review-bot",
+      topic: parsed.kafka?.topic || "code-events",
+      ssl: parseBoolean(parsed.kafka?.ssl, false),
+      sasl: parseBoolean(parsed.kafka?.sasl?.enabled, false)
         ? {
-            mechanism: "plain",
-            username: process.env.KAFKA_USERNAME,
-            password: process.env.KAFKA_PASSWORD || "",
+            mechanism: parsed.kafka?.sasl?.mechanism || "plain",
+            username: parsed.kafka?.sasl?.username || "",
+            password: parsed.kafka?.sasl?.password || "",
           }
         : undefined,
     },
     repo: {
       baseDir: repoBaseDir,
-      pathMap: parseJsonMap("REPO_PATH_MAP_JSON"),
-      rewriteFrom: process.env.REPO_URL_REWRITE_FROM || "",
-      rewriteTo: process.env.REPO_URL_REWRITE_TO || "",
+      defaultRewrite: {
+        from: parsed.repo?.defaultRewrite?.from || "",
+        to: parsed.repo?.defaultRewrite?.to || "",
+      },
+      repos: parseObject(parsed.repo?.repos),
     },
     claude: {
-      maxTurns: parseNumber(process.env.CLAUDE_MAX_TURNS, 8),
-      minScore: parseNumber(process.env.CLAUDE_REVIEW_MIN_SCORE, 70),
-      allowedTools: (process.env.CLAUDE_ALLOWED_TOOLS || "Skill,Read,Glob,Grep,Bash")
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean),
+      maxTurns: parseNumber(parsed.claude?.maxTurns, 8),
+      minScore: parseNumber(parsed.claude?.minScore, 70),
+      allowedTools: parseStringArray(parsed.claude?.allowedTools, ["Skill", "Read", "Glob", "Grep", "Bash"]),
     },
     feishu: {
-      webhookUrl: process.env.FEISHU_WEBHOOK_URL || "",
-      idMap: parseJsonMap("FEISHU_USER_ID_MAP_JSON"),
-      atIdType: process.env.FEISHU_AT_ID_TYPE || "user_id",
+      webhookUrl: parsed.feishu?.webhookUrl || "",
+      atIdType: parsed.feishu?.atIdType || "user_id",
+      userMapFile,
+      userMap: parseObject(userMap),
     },
   };
 }
 
 export function resolveRepoPath(config, repoKey) {
-  const configuredPath = config.repo.pathMap[repoKey];
-  if (configuredPath) {
-    return configuredPath;
+  const repoConfig = config.repo.repos[repoKey];
+  if (repoConfig?.localPath) {
+    return repoConfig.localPath;
   }
   return path.join(config.repo.baseDir, repoKey);
+}
+
+export function resolveRepoConfig(config, repoKey) {
+  return parseObject(config.repo.repos[repoKey]);
+}
+
+function loadJsonFile(filePath, fallback) {
+  if (!fs.existsSync(filePath)) {
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    throw new Error(`Invalid JSON file ${filePath}: ${error.message}`);
+  }
 }
