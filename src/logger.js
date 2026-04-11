@@ -1,4 +1,8 @@
 export function log(level, message, extra = undefined) {
+  if (level !== "error") {
+    return;
+  }
+
   const payload = {
     ts: new Date().toISOString(),
     level,
@@ -10,11 +14,7 @@ export function log(level, message, extra = undefined) {
   }
 
   const line = JSON.stringify(payload);
-  if (level === "error") {
-    console.error(line);
-    return;
-  }
-  console.log(line);
+  console.error(line);
 }
 
 export const logger = {

@@ -1,34 +1,46 @@
-import { loadConfig } from "./config.js";
+import { hasRepoPath, loadConfig } from "./config.js";
 import { logger } from "./logger.js";
 import { startConsumer } from "./kafka-consumer.js";
 import { ensureRepoCheckout } from "./repo-manager.js";
 import { reviewCommitWithClaude } from "./claude-reviewer.js";
-import { notifyLowScore } from "./feishu.js";
 
 async function handleCommitEvent(config, event, metadata) {
   const reviewId = event?.body?.event_id || `${metadata.topic}-${metadata.partition}-${metadata.offset}`;
+  const repoKey = event?.body?.repo?.key;
   logger.info("processing commit event", {
     reviewId,
     metadata,
-    repo: event?.body?.repo?.key,
+    repo: repoKey,
     author: event?.body?.author?.email,
   });
+
+  if (!hasRepoPath(config, repoKey)) {
+    logger.warn("skipping event for unmapped repo", {
+      reviewId,
+      metadata,
+      repo: repoKey,
+    });
+    return;
+  }
 
   const { repoPath } = await ensureRepoCheckout(config, event);
   const review = await reviewCommitWithClaude(config, event, repoPath);
 
   logger.info("review completed", {
     reviewId,
-    repo: event.body.repo.key,
+    repo: repoKey,
     author: event.body.author.email,
     score: review.score,
     threshold: config.claude.minScore,
     shouldAlert: review.shouldAlert,
+    report: {
+      summary: review.summary,
+      risks: review.risks,
+      mustFix: review.mustFix,
+      niceToHave: review.niceToHave,
+      raw: review.raw,
+    },
   });
-
-  if (review.shouldAlert || review.score < config.claude.minScore) {
-    await notifyLowScore(config, event, review);
-  }
 }
 
 async function main() {

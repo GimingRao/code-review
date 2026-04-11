@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { resolveRepoConfig, resolveRepoPath } from "./config.js";
+import { resolveRepoPath } from "./config.js";
 import { logger } from "./logger.js";
 
 const execFileAsync = promisify(execFile);
@@ -15,36 +15,21 @@ async function runGit(args, cwd) {
   return { stdout, stderr };
 }
 
-function rewriteRepoUrl(config, repoKey, repoUrl) {
-  const repoConfig = resolveRepoConfig(config, repoKey);
-  if (repoConfig.cloneUrl) {
-    return repoConfig.cloneUrl;
-  }
-
-  const rewriteFrom = repoConfig.rewrite?.from || config.repo.defaultRewrite.from;
-  const rewriteTo = repoConfig.rewrite?.to || config.repo.defaultRewrite.to;
-  if (rewriteFrom && rewriteTo) {
-    return repoUrl.replace(rewriteFrom, rewriteTo);
-  }
-  return repoUrl;
-}
-
 export async function ensureRepoCheckout(config, event) {
   const repoKey = event.body.repo.key;
-  const repoUrl = rewriteRepoUrl(config, repoKey, event.body.repo.url);
   const commitSha = extractCommitSha(event.body.commit.url);
   const repoPath = resolveRepoPath(config, repoKey);
-  const repoParent = path.dirname(repoPath);
+  const gitDir = path.join(repoPath, ".git");
 
-  fs.mkdirSync(repoParent, { recursive: true });
-
-  if (!fs.existsSync(path.join(repoPath, ".git"))) {
-    logger.info("cloning repository", { repoKey, repoPath, repoUrl });
-    await runGit(["clone", repoUrl, repoPath], config.repo.baseDir);
-  } else {
-    logger.info("fetching repository", { repoKey, repoPath });
-    await runGit(["fetch", "--all", "--tags", "--prune"], repoPath);
+  if (!fs.existsSync(repoPath)) {
+    throw new Error(`Local repository path does not exist for ${repoKey}: ${repoPath}`);
   }
+  if (!fs.existsSync(gitDir)) {
+    throw new Error(`Local repository path is not a git repo for ${repoKey}: ${repoPath}`);
+  }
+
+  logger.info("fetching repository", { repoKey, repoPath });
+  await runGit(["fetch", "origin", "--tags", "--prune"], repoPath);
 
   logger.info("checking out commit", { repoKey, commitSha, repoPath });
   await runGit(["checkout", "--force", commitSha], repoPath);

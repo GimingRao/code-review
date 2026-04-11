@@ -10,16 +10,6 @@ function requireField(object, fieldPath) {
   return value;
 }
 
-function parseBoolean(value, fallback = false) {
-  if (value === undefined || value === null) {
-    return fallback;
-  }
-  if (typeof value === "boolean") {
-    return value;
-  }
-  return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
-}
-
 function parseNumber(value, fallback) {
   if (value === undefined || value === null || value === "") {
     return fallback;
@@ -56,9 +46,6 @@ export function loadConfig() {
   const userMapFile = path.resolve(process.cwd(), parsed.feishu?.userMapFile || "./feishu-users.json");
   const userMap = loadJsonFile(userMapFile, {});
 
-  const repoBaseDir = requireField(parsed, "repo.baseDir");
-  fs.mkdirSync(repoBaseDir, { recursive: true });
-
   return {
     anthropicApiKey: parsed.anthropicApiKey || "",
     kafka: {
@@ -66,22 +53,9 @@ export function loadConfig() {
       clientId: parsed.kafka?.clientId || "commit-review-bot",
       groupId: parsed.kafka?.groupId || "commit-review-bot",
       topic: parsed.kafka?.topic || "code-events",
-      ssl: parseBoolean(parsed.kafka?.ssl, false),
-      sasl: parseBoolean(parsed.kafka?.sasl?.enabled, false)
-        ? {
-            mechanism: parsed.kafka?.sasl?.mechanism || "plain",
-            username: parsed.kafka?.sasl?.username || "",
-            password: parsed.kafka?.sasl?.password || "",
-          }
-        : undefined,
     },
     repo: {
-      baseDir: repoBaseDir,
-      defaultRewrite: {
-        from: parsed.repo?.defaultRewrite?.from || "",
-        to: parsed.repo?.defaultRewrite?.to || "",
-      },
-      repos: parseObject(parsed.repo?.repos),
+      localPaths: parseObject(parsed.repo?.localPaths),
     },
     claude: {
       maxTurns: parseNumber(parsed.claude?.maxTurns, 8),
@@ -98,15 +72,16 @@ export function loadConfig() {
 }
 
 export function resolveRepoPath(config, repoKey) {
-  const repoConfig = config.repo.repos[repoKey];
-  if (repoConfig?.localPath) {
-    return repoConfig.localPath;
+  const repoPath = config.repo.localPaths[repoKey];
+  if (typeof repoPath === "string" && repoPath.trim()) {
+    return repoPath;
   }
-  return path.join(config.repo.baseDir, repoKey);
+  throw new Error(`Missing local repo path mapping for repo: ${repoKey}`);
 }
 
-export function resolveRepoConfig(config, repoKey) {
-  return parseObject(config.repo.repos[repoKey]);
+export function hasRepoPath(config, repoKey) {
+  const repoPath = config.repo.localPaths[repoKey];
+  return typeof repoPath === "string" && !!repoPath.trim();
 }
 
 function loadJsonFile(filePath, fallback) {

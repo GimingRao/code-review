@@ -1,4 +1,6 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { unstable_v2_prompt } from "@anthropic-ai/claude-agent-sdk";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { logger } from "./logger.js";
 
 function buildPrompt(event) {
@@ -23,21 +25,27 @@ function buildPrompt(event) {
 2. 重点检查正确性、兼容性、回归风险、异常处理、可维护性和测试缺失。
 3. 必要时可以读取当前仓库文件，结合 diff 上下文分析，而不是只看提交说明。
 4. 不要修改任何代码。
-5. 最终只输出一个 JSON 对象，不要输出 Markdown，不要输出代码块。
+5. 输出一份 Markdown 格式的评审报告，结构如下：
 
-评分规则：
-- score 范围 0-100，100 表示可直接合并
-- 低于 70 视为需要群内提醒
+# Code Review Report
 
-JSON Schema:
-{
-  "score": 0,
-  "summary": "一句话总结",
-  "risks": ["风险1"],
-  "must_fix": ["必须修复项"],
-  "nice_to_have": ["建议优化项"],
-  "should_alert": false
-}
+## 提交信息
+（repo / author / committed_at / commit_url / message）
+
+## 概述
+一句话总结本次提交的变更内容和影响范围。
+
+## 风险项
+逐一列出潜在风险，每条包含：
+- 风险描述
+- 影响范围
+- 建议处理方式
+
+## 必须修复
+列出阻断性或高优先级问题。
+
+## 建议优化
+列出非阻断性的改进建议。
 
 提交信息：
 - repo: ${body.repo.key}
@@ -52,70 +60,75 @@ ${diffText || "(no diff provided)"}
 `.trim();
 }
 
-function extractJsonObject(text) {
-  const trimmed = text.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      return JSON.parse(trimmed.slice(start, end + 1));
-    }
-    throw new Error("Claude response does not contain valid JSON");
-  }
+function buildClaudeOptions(config, repoPath) {
+  return {
+    cwd: repoPath,
+    env: {
+      ...process.env,
+      ANTHROPIC_AUTH_TOKEN: process.env.ZHIPU_API_KEY || "",
+      ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic",
+      API_TIMEOUT_MS: "3000000",
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-4.5-air",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-4.7",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-5.1",
+    },
+    maxTurns: config.claude.maxTurns,
+    allowedTools: config.claude.allowedTools,
+    permissionMode: "dontAsk",
+    settingSources: ["project"],
+    systemPrompt:
+      "You are a principal engineer performing commit review. Be skeptical, concrete, and concise. Output a Markdown report.",
+  };
 }
 
-function collectTextFromMessage(message) {
-  if (!message || !Array.isArray(message.content)) {
-    return "";
+async function generateReviewReport(config, prompt, repoPath) {
+  const result = await unstable_v2_prompt(prompt, buildClaudeOptions(config, repoPath));
+  if (result?.type !== "result") {
+    throw new Error("Claude SDK returned a non-result message");
   }
-  return message.content
-    .filter((block) => typeof block?.text === "string")
-    .map((block) => block.text)
-    .join("\n");
+
+  if (result.subtype !== "success") {
+    const details = Array.isArray(result.errors) && result.errors.length > 0
+      ? result.errors.join(" | ")
+      : "unknown Claude execution error";
+    throw new Error(`Claude review failed: ${result.subtype} - ${details}`);
+  }
+
+  if (typeof result.result !== "string" || !result.result.trim()) {
+    throw new Error("Claude review returned empty report");
+  }
+
+  return result.result.trim();
 }
 
 export async function reviewCommitWithClaude(config, event, repoPath) {
   const prompt = buildPrompt(event);
-  const outputs = [];
+  const report = await generateReviewReport(config, prompt, repoPath);
 
-  for await (const message of query({
-    prompt,
-    options: {
-      cwd: repoPath,
-      maxTurns: config.claude.maxTurns,
-      allowedTools: config.claude.allowedTools,
-      permissionMode: "dontAsk",
-      settingSources: ["project"],
-      systemPrompt:
-        "You are a principal engineer performing commit review. Be skeptical, concrete, and concise.",
-    },
-  })) {
-    const text = collectTextFromMessage(message);
-    if (text) {
-      outputs.push(text);
-    }
-  }
+  const outDir = join(process.cwd(), "out");
+  mkdirSync(outDir, { recursive: true });
 
-  const raw = outputs.join("\n").trim();
-  logger.info("claude review finished", {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const repoSlug = (event.body.repo.key || "unknown").replace(/[\/\\]/g, "_");
+  const reportPath = join(outDir, `${timestamp}-${repoSlug}.md`);
+
+  writeFileSync(reportPath, report, "utf-8");
+
+  logger.info("review report saved", {
     repo: event.body.repo.key,
     author: event.body.author.email,
-    preview: raw.slice(0, 500),
+    reportPath,
   });
 
-  const parsed = extractJsonObject(raw);
   return {
-    raw,
-    score: Number(parsed.score ?? 0),
-    summary: parsed.summary || "",
-    risks: Array.isArray(parsed.risks) ? parsed.risks : [],
-    mustFix: Array.isArray(parsed.must_fix) ? parsed.must_fix : [],
-    niceToHave: Array.isArray(parsed.nice_to_have) ? parsed.nice_to_have : [],
-    shouldAlert:
-      typeof parsed.should_alert === "boolean"
-        ? parsed.should_alert
-        : Number(parsed.score ?? 0) < config.claude.minScore,
+    raw: report,
+    reportPath,
+    summary: "",
+    risks: [],
+    mustFix: [],
+    niceToHave: [],
+    score: 0,
+    shouldAlert: false,
   };
 }
