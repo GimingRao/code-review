@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"permission_denial\\\\\\\\|bypassPermissions\\\\\\\\|allowDangerouslySkipPermissions\" \"D:\\\\ronds_code_tool\\\\ai_tools\\\\code-review\\\\node_modules\\\\@anthropic-ai\\\\claude-agent-sdk\\\\cli.js\")",
+      "Bash(node -e \"const cp = require\\('child_process'\\); const r = cp.spawnSync\\('node', ['-e', 'console.log\\(process.cwd\\(\\)\\)'], { cwd: String.raw\\\\`D:\\\\work_code\\\\ronds.supercare.backend\\\\` }\\); console.log\\(r.stdout?.toString\\(\\)\\);\")",
+      "Bash(node -e ':*)",
+      "Bash(git:*)",
+      "Bash(claude:*)",
+      "Bash(ANTHROPIC_DEFAULT_SONNET_MODEL=glm-4.7 ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.1 ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-4.5-air claude:*)",
+      "Bash(node --check \"D:/ronds_code_tool/ai_tools/code-review/src/config.js\")",
+      "Bash(node --check \"D:/ronds_code_tool/ai_tools/code-review/src/repo-manager.js\")",
+      "Bash(node --check \"D:/ronds_code_tool/ai_tools/code-review/src/claude-reviewer.js\")",
+      "Bash(node --check \"D:/ronds_code_tool/ai_tools/code-review/src/index.js\")",
+      "Bash(node:*)",
+      "Read(//d/Program Files/nodejs/node_global/**)",
+      "Bash(cmd.exe:*)",
+      "Bash(python:*)",
+      "Bash(npm:*)"
+    ]
+  }
+}

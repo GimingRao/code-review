@@ -4,3 +4,4 @@ feishu-users.json
 .repos
 .claude-review
 out/
+ai/CodeReview/*

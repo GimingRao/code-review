@@ -35,6 +35,45 @@ function parseStringArray(value, fallback = []) {
   return value.map((item) => String(item).trim()).filter(Boolean);
 }
 
+function parseRepoConfig(repoConfig) {
+  const localPaths = parseObject(repoConfig?.localPaths);
+  const checklistPaths = parseObject(repoConfig?.checklistPaths);
+  const reviewWorkspaceRoot = typeof repoConfig?.reviewWorkspaceRoot === "string"
+    ? repoConfig.reviewWorkspaceRoot.trim()
+    : "";
+
+  const repoKeys = new Set([
+    ...Object.keys(localPaths),
+    ...Object.keys(checklistPaths),
+  ]);
+
+  const repositories = {};
+  for (const repoKey of repoKeys) {
+    const localPath = typeof localPaths[repoKey] === "string"
+      ? localPaths[repoKey].trim()
+      : "";
+    const checklistPath = typeof checklistPaths[repoKey] === "string"
+      ? checklistPaths[repoKey].trim()
+      : "";
+
+    repositories[repoKey] = {
+      localPath,
+      checklistPath: checklistPath
+        ? path.resolve(process.cwd(), checklistPath)
+        : "",
+    };
+  }
+
+  return {
+    localPaths,
+    checklistPaths,
+    reviewWorkspaceRoot: reviewWorkspaceRoot
+      ? path.resolve(process.cwd(), reviewWorkspaceRoot)
+      : path.resolve(process.cwd(), "ai", "CodeReview", "Worktrees"),
+    repositories,
+  };
+}
+
 export function loadConfig() {
   const configPath = path.resolve(process.cwd(), "config.yaml");
   if (!fs.existsSync(configPath)) {
@@ -45,6 +84,7 @@ export function loadConfig() {
   const parsed = YAML.parse(raw) || {};
   const userMapFile = path.resolve(process.cwd(), parsed.feishu?.userMapFile || "./feishu-users.json");
   const userMap = loadJsonFile(userMapFile, {});
+  const repo = parseRepoConfig(parsed.repo);
 
   return {
     anthropicApiKey: parsed.anthropicApiKey || "",
@@ -54,9 +94,7 @@ export function loadConfig() {
       groupId: parsed.kafka?.groupId || "commit-review-bot",
       topic: parsed.kafka?.topic || "code-events",
     },
-    repo: {
-      localPaths: parseObject(parsed.repo?.localPaths),
-    },
+    repo,
     claude: {
       maxTurns: parseNumber(parsed.claude?.maxTurns, 8),
       minScore: parseNumber(parsed.claude?.minScore, 70),
@@ -72,7 +110,7 @@ export function loadConfig() {
 }
 
 export function resolveRepoPath(config, repoKey) {
-  const repoPath = config.repo.localPaths[repoKey];
+  const repoPath = config.repo.repositories[repoKey]?.localPath;
   if (typeof repoPath === "string" && repoPath.trim()) {
     return repoPath;
   }
@@ -80,8 +118,25 @@ export function resolveRepoPath(config, repoKey) {
 }
 
 export function hasRepoPath(config, repoKey) {
-  const repoPath = config.repo.localPaths[repoKey];
+  const repoPath = config.repo.repositories[repoKey]?.localPath;
   return typeof repoPath === "string" && !!repoPath.trim();
+}
+
+export function resolveRepoChecklistPath(config, repoKey) {
+  const checklistPath = config.repo.repositories[repoKey]?.checklistPath;
+  if (typeof checklistPath === "string" && checklistPath.trim()) {
+    return checklistPath;
+  }
+  throw new Error(`Missing checklist path mapping for repo: ${repoKey}`);
+}
+
+export function hasRepoChecklist(config, repoKey) {
+  const checklistPath = config.repo.repositories[repoKey]?.checklistPath;
+  return typeof checklistPath === "string" && !!checklistPath.trim();
+}
+
+export function resolveReviewWorkspaceRoot(config) {
+  return config.repo.reviewWorkspaceRoot;
 }
 
 function loadJsonFile(filePath, fallback) {
